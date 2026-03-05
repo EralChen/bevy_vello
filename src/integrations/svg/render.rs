@@ -2,15 +2,23 @@ use bevy::{
     camera::visibility::RenderLayers,
     prelude::*,
     render::{
-        Extract, camera::ExtractedCamera, sync_world::TemporaryRenderEntity, view::ExtractedView,
+        Extract,
+        camera::ExtractedCamera,
+        render_asset::RenderAssets,
+        renderer::{RenderDevice, RenderQueue},
+        sync_world::TemporaryRenderEntity,
+        texture::GpuImage,
+        view::ExtractedView,
     },
 };
 use kurbo::Affine;
+use std::collections::HashSet;
+use vello::{RenderParams, Scene};
 
-use super::{VelloSvgAnchor, asset::VelloSvg};
+use super::{VelloSvgAnchor, VelloUiSvgImage, asset::VelloSvg};
 use crate::{
     prelude::*,
-    render::{VelloEntityCountData, prepare::PreparedAffine},
+    render::{VelloEntityCountData, VelloRenderSettings, VelloRenderer, prepare::PreparedAffine},
 };
 
 #[derive(Component, Clone)]
@@ -27,6 +35,7 @@ pub struct ExtractedUiVelloSvg {
     pub ui_transform: UiGlobalTransform,
     pub alpha: f32,
     pub ui_node: ComputedNode,
+    pub render_image: Option<Handle<Image>>,
 }
 
 pub fn extract_world_svg_assets(
@@ -108,6 +117,7 @@ pub fn extract_ui_svg_assets(
             &ComputedNode,
             Option<&RenderLayers>,
             &InheritedVisibility,
+            Option<&VelloUiSvgImage>,
         )>,
     >,
     assets: Extract<Res<Assets<VelloSvg>>>,
@@ -119,7 +129,7 @@ pub fn extract_ui_svg_assets(
     let mut views: Vec<_> = query_views.iter().collect();
     views.sort_unstable_by_key(|(camera, _)| camera.order);
 
-    for (asset_handle, ui_transform, ui_node, render_layers, inherited_visibility) in
+    for (asset_handle, ui_transform, ui_node, render_layers, inherited_visibility, render_image) in
         query_vectors.iter()
     {
         // Skip if visibility conditions are not met.
@@ -143,6 +153,7 @@ pub fn extract_ui_svg_assets(
                     ui_transform: *ui_transform,
                     ui_node: *ui_node,
                     alpha: asset.alpha,
+                    render_image: render_image.map(|r| r.0.clone()),
                 })
                 .insert(TemporaryRenderEntity);
             n_svgs += 1;
@@ -342,5 +353,90 @@ pub fn prepare_asset_affines(
                 .entity(entity)
                 .insert(PreparedAffine(Affine::new(transform)));
         }
+    }
+}
+
+/// Cache tracking which render images have already been rendered.
+/// Keyed by image `AssetId` — when the main world creates a new image
+/// (due to resize or asset change), the new ID won't be in the cache
+/// and the SVG will be re-rendered.
+#[derive(Resource, Default)]
+pub struct UiSvgRenderCache(HashSet<AssetId<Image>>);
+
+/// Renders each `UiVelloSvg` that has a per-entity render image to its own GPU texture.
+/// Skips already-rendered images (static SVGs only need one render).
+pub fn render_ui_svgs_to_textures(
+    gpu_images: Res<RenderAssets<GpuImage>>,
+    device: Res<RenderDevice>,
+    queue: Res<RenderQueue>,
+    renderer: Res<VelloRenderer>,
+    render_settings: Res<VelloRenderSettings>,
+    ui_svgs: Query<&ExtractedUiVelloSvg>,
+    mut cache: ResMut<UiSvgRenderCache>,
+) {
+    for svg in ui_svgs.iter() {
+        let Some(ref render_image_handle) = svg.render_image else {
+            continue;
+        };
+
+        // Skip if already rendered this image
+        if cache.0.contains(&render_image_handle.id()) {
+            continue;
+        }
+
+        let Some(gpu_image) = gpu_images.get(render_image_handle.id()) else {
+            continue;
+        };
+
+        if svg.alpha <= 0.0 {
+            cache.0.insert(render_image_handle.id());
+            continue;
+        }
+
+        let mut scene = Scene::new();
+
+        // Scale SVG to fit the render image while maintaining aspect ratio
+        let scale_x = gpu_image.size.width as f64 / svg.asset.width as f64;
+        let scale_y = gpu_image.size.height as f64 / svg.asset.height as f64;
+        let scale = scale_x.min(scale_y);
+        let affine = Affine::scale(scale);
+
+        if svg.alpha < 1.0 {
+            scene.push_layer(
+                vello::peniko::Fill::NonZero,
+                vello::peniko::Mix::Normal,
+                svg.alpha,
+                affine,
+                &vello::kurbo::Rect::new(
+                    0.0,
+                    0.0,
+                    svg.asset.width as f64,
+                    svg.asset.height as f64,
+                ),
+            );
+        }
+        scene.append(&svg.asset.scene, Some(affine));
+        if svg.alpha < 1.0 {
+            scene.pop_layer();
+        }
+
+        renderer
+            .lock()
+            .unwrap()
+            .render_to_texture(
+                device.wgpu_device(),
+                &queue,
+                &scene,
+                &gpu_image.texture_view,
+                &RenderParams {
+                    base_color: vello::peniko::Color::TRANSPARENT,
+                    width: gpu_image.size.width,
+                    height: gpu_image.size.height,
+                    antialiasing_method: render_settings.antialiasing,
+                },
+            )
+            .unwrap();
+
+        cache.0.insert(render_image_handle.id());
     }
 }

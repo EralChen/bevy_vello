@@ -35,6 +35,12 @@ pub struct VelloSvg2d(pub Handle<VelloSvg>);
 #[component(on_add = bevy::camera::visibility::add_visibility_class::<UiVelloSvg>)]
 pub struct UiVelloSvg(pub Handle<VelloSvg>);
 
+/// Internal component tracking a per-entity render image for UI SVGs.
+/// When present, the SVG is rendered to this image and displayed via `ImageNode`,
+/// enabling correct Z-ordering with other Bevy UI elements.
+#[derive(Component)]
+pub struct VelloUiSvgImage(pub Handle<Image>);
+
 /// Describes how the asset is positioned relative to its [`Transform`]. It defaults to
 /// [`VelloSvgAnchor::Center`].
 ///

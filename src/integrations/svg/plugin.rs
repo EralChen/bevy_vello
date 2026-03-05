@@ -1,6 +1,6 @@
 use bevy::{
     prelude::*,
-    render::{Render, RenderApp, RenderSystems},
+    render::{Render, RenderApp, RenderSystems, renderer::RenderDevice},
 };
 
 use super::{VelloSvg, VelloSvgAnchor, asset_loader::VelloSvgLoader, render};
@@ -31,6 +31,8 @@ impl Plugin for SvgIntegrationPlugin {
                         .in_set(bevy::camera::visibility::VisibilitySystems::CalculateBounds),
                     systems::update_ui_svg_content_size_on_change
                         .in_set(bevy::ui::UiSystems::Content),
+                    systems::manage_ui_svg_render_images
+                        .after(bevy::ui::UiSystems::Content),
                 ),
             );
 
@@ -39,6 +41,7 @@ impl Plugin for SvgIntegrationPlugin {
         };
 
         render_app
+            .init_resource::<render::UiSvgRenderCache>()
             .add_systems(
                 ExtractSchedule,
                 (
@@ -50,6 +53,12 @@ impl Plugin for SvgIntegrationPlugin {
             .add_systems(
                 Render,
                 (render::prepare_asset_affines).in_set(RenderSystems::Prepare),
+            )
+            .add_systems(
+                Render,
+                render::render_ui_svgs_to_textures
+                    .in_set(RenderSystems::Render)
+                    .run_if(resource_exists::<RenderDevice>),
             );
     }
 }

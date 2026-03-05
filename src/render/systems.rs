@@ -144,6 +144,10 @@ pub fn sort_render_items(
             ));
         }
         for (&affine, svg) in view_ui_svgs.iter() {
+            // Skip SVGs rendered to per-entity textures (displayed via ImageNode)
+            if svg.render_image.is_some() {
+                continue;
+            }
             ui_render_queue.push((
                 svg.ui_node.stack_index,
                 VelloUiRenderItem::Svg {

@@ -1,9 +1,15 @@
 use crate::prelude::*;
 use bevy::{
     camera::primitives::Aabb,
+    image::ToExtents,
     prelude::*,
+    render::render_resource::{
+        Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+    },
     ui::{ContentSize, NodeMeasure},
 };
+
+use super::VelloUiSvgImage;
 
 fn helper_calculate_aabb(svg: &VelloSvg, anchor: &VelloSvgAnchor) -> Aabb {
     let (width, height) = (svg.width, svg.height);
@@ -66,7 +72,7 @@ pub fn update_svg_2d_aabb_on_change(
 pub fn update_ui_svg_content_size_on_change(
     mut text_q: Query<
         (&mut ContentSize, &ComputedNode, &mut UiVelloSvg),
-        Or<(Changed<UiVelloSvg>, Changed<ComputedNode>)>,
+        (Or<(Changed<UiVelloSvg>, Changed<ComputedNode>)>, Without<VelloUiSvgImage>),
     >,
     svgs: Res<Assets<VelloSvg>>,
 ) {
@@ -80,4 +86,72 @@ pub fn update_ui_svg_content_size_on_change(
         let measure = NodeMeasure::Fixed(bevy::ui::FixedMeasure { size });
         content_size.set(measure);
     }
+}
+
+/// Creates per-entity render images for `UiVelloSvg` entities and inserts `ImageNode`
+/// so the SVG participates in normal Bevy UI z-ordering.
+pub fn manage_ui_svg_render_images(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    svgs: Res<Assets<VelloSvg>>,
+    query: Query<(
+        Entity,
+        &UiVelloSvg,
+        Option<&VelloUiSvgImage>,
+    )>,
+) {
+    for (entity, svg_handle, existing) in query.iter() {
+        let Some(svg) = svgs.get(&svg_handle.0) else {
+            continue;
+        };
+
+        let target_w = (svg.width.ceil() as u32).max(1);
+        let target_h = (svg.height.ceil() as u32).max(1);
+
+        // Skip if already set up with the right size
+        if let Some(existing) = existing {
+            if let Some(img) = images.get(existing.0.id()) {
+                let ext = img.size().to_extents();
+                if ext.width == target_w && ext.height == target_h {
+                    continue;
+                }
+            }
+        }
+
+        // Create a render target image
+        let image_handle = create_vello_ui_render_image(&mut images, target_w, target_h);
+        commands.entity(entity).insert((
+            VelloUiSvgImage(image_handle.clone()),
+            ImageNode::new(image_handle),
+        ));
+    }
+}
+
+fn create_vello_ui_render_image(
+    images: &mut Assets<Image>,
+    width: u32,
+    height: u32,
+) -> Handle<Image> {
+    let size = Extent3d {
+        width,
+        height,
+        ..default()
+    };
+    let mut image = Image {
+        texture_descriptor: TextureDescriptor {
+            label: None,
+            size,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            mip_level_count: 1,
+            sample_count: 1,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::STORAGE_BINDING,
+            view_formats: &[],
+        },
+        ..default()
+    };
+    image.resize(size);
+    images.add(image)
 }
