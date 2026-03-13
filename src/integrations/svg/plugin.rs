@@ -3,7 +3,7 @@ use bevy::{
     render::{Render, RenderApp, RenderSystems, renderer::RenderDevice},
 };
 
-use super::{VelloSvg, VelloSvgAnchor, asset_loader::VelloSvgLoader, render};
+use super::{VelloSvg, VelloSvgAnchor, VelloSvgLayer2d, asset_loader::VelloSvgLoader, render};
 use crate::{
     integrations::svg::{UiVelloSvg, VelloSvg2d, systems},
     render::extract::VelloExtractStep,
@@ -14,19 +14,25 @@ pub struct SvgIntegrationPlugin;
 impl Plugin for SvgIntegrationPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(feature = "picking")]
-        app.add_plugins(crate::picking::WorldPickingPlugin::<VelloSvg2d>::default());
+        app.add_plugins((
+            crate::picking::WorldPickingPlugin::<VelloSvg2d>::default(),
+            crate::picking::WorldPickingPlugin::<VelloSvgLayer2d>::default(),
+        ));
 
         app.init_asset_loader::<VelloSvgLoader>()
             .init_asset::<VelloSvg>()
             .register_type::<UiVelloSvg>()
             .register_type::<VelloSvg2d>()
+            .register_type::<VelloSvgLayer2d>()
             .register_type::<VelloSvgAnchor>()
             .add_systems(
                 PostUpdate,
                 (
                     (
                         systems::update_svg_2d_aabb_on_asset_load,
+                        systems::update_svg_layer_2d_aabb_on_asset_load,
                         systems::update_svg_2d_aabb_on_change,
+                        systems::update_svg_layer_2d_aabb_on_change,
                     )
                         .in_set(bevy::camera::visibility::VisibilitySystems::CalculateBounds),
                     systems::update_ui_svg_content_size_on_change
@@ -46,6 +52,7 @@ impl Plugin for SvgIntegrationPlugin {
                 ExtractSchedule,
                 (
                     render::extract_world_svg_assets,
+                    render::extract_world_svg_layer_assets,
                     render::extract_ui_svg_assets,
                 )
                     .in_set(VelloExtractStep::ExtractAssets),

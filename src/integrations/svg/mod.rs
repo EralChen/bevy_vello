@@ -4,7 +4,7 @@ mod systems;
 pub(crate) mod render;
 
 mod asset;
-pub use asset::VelloSvg;
+pub use asset::{VelloSvg, VelloSvgLayer};
 
 mod parse;
 pub use parse::{load_svg_from_bytes, load_svg_from_str};
@@ -25,6 +25,17 @@ use bevy::{
 #[component(on_add = bevy::camera::visibility::add_visibility_class::<VelloSvg2d>)]
 pub struct VelloSvg2d(pub Handle<VelloSvg>);
 
+/// A renderable named layer extracted from an SVG in the world.
+#[derive(Component, Default, Debug, Clone, PartialEq, Eq, Reflect)]
+#[require(Aabb, VelloSvgAnchor, Transform, Visibility, VisibilityClass)]
+#[cfg_attr(feature = "picking", require(Pickable))]
+#[reflect(Component)]
+#[component(on_add = bevy::camera::visibility::add_visibility_class::<VelloSvgLayer2d>)]
+pub struct VelloSvgLayer2d {
+    pub svg: Handle<VelloSvg>,
+    pub layer: String,
+}
+
 /// A renderable SVG that may be used in Bevy UI.
 ///
 /// ### Object fit
@@ -39,7 +50,12 @@ pub struct UiVelloSvg(pub Handle<VelloSvg>);
 /// When present, the SVG is rendered to this image and displayed via `ImageNode`,
 /// enabling correct Z-ordering with other Bevy UI elements.
 #[derive(Component)]
-pub struct VelloUiSvgImage(pub Handle<Image>);
+pub struct VelloUiSvgImage {
+    pub image: Handle<Image>,
+    /// The SVG asset ID this image was rendered from.
+    /// Used to detect handle changes and invalidate the render cache.
+    pub svg_id: AssetId<VelloSvg>,
+}
 
 /// Describes how the asset is positioned relative to its [`Transform`]. It defaults to
 /// [`VelloSvgAnchor::Center`].

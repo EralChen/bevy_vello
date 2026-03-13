@@ -38,7 +38,9 @@ pub mod prelude {
         VelloLottie, VelloLottie2d, VelloLottieAnchor,
     };
     #[cfg(feature = "svg")]
-    pub use crate::integrations::svg::{UiVelloSvg, VelloSvg, VelloSvg2d, VelloSvgAnchor};
+    pub use crate::integrations::svg::{
+        UiVelloSvg, VelloSvg, VelloSvg2d, VelloSvgAnchor, VelloSvgLayer, VelloSvgLayer2d,
+    };
     #[cfg(feature = "text")]
     pub use crate::integrations::text::{
         UiVelloText, VelloFont, VelloText2d, VelloTextAlign, VelloTextAnchor, VelloTextStyle,

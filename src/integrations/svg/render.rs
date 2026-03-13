@@ -15,7 +15,7 @@ use kurbo::Affine;
 use std::collections::HashSet;
 use vello::{RenderParams, Scene};
 
-use super::{VelloSvgAnchor, VelloUiSvgImage, asset::VelloSvg};
+use super::{VelloSvgAnchor, VelloSvgLayer2d, VelloUiSvgImage, asset::VelloSvg};
 use crate::{
     prelude::*,
     render::{VelloEntityCountData, VelloRenderSettings, VelloRenderer, prepare::PreparedAffine},
@@ -104,6 +104,70 @@ pub fn extract_world_svg_assets(
     frame_data.n_world_svgs = n_svgs;
 }
 
+pub fn extract_world_svg_layer_assets(
+    mut commands: Commands,
+    query_views: Query<
+        (&ExtractedCamera, Option<&RenderLayers>),
+        (With<Camera2d>, With<VelloView>),
+    >,
+    query_vectors: Extract<
+        Query<
+            (
+                &VelloSvgLayer2d,
+                &VelloSvgAnchor,
+                &GlobalTransform,
+                Option<&RenderLayers>,
+                &ViewVisibility,
+                &InheritedVisibility,
+            ),
+            Without<Node>,
+        >,
+    >,
+    assets: Extract<Res<Assets<VelloSvg>>>,
+    mut frame_data: ResMut<VelloEntityCountData>,
+) {
+    let mut n_svgs = frame_data.n_world_svgs;
+
+    let mut views: Vec<_> = query_views.iter().collect();
+    views.sort_unstable_by_key(|(camera, _)| camera.order);
+
+    for (layer_ref, asset_anchor, transform, render_layers, view_visibility, inherited_visibility) in query_vectors.iter() {
+        if !view_visibility.get() || !inherited_visibility.get() {
+            continue;
+        }
+
+        let Some(asset) = assets.get(layer_ref.svg.id()) else {
+            continue;
+        };
+        let Some(layer) = asset.layer(&layer_ref.layer) else {
+            continue;
+        };
+
+        let asset_render_layers = render_layers.unwrap_or_default();
+        if views.iter().any(|(_, camera_layers)| {
+            asset_render_layers.intersects(camera_layers.unwrap_or_default())
+        }) {
+            commands
+                .spawn(ExtractedVelloSvg2d {
+                    asset: VelloSvg {
+                        scene: layer.scene.clone(),
+                        width: layer.width,
+                        height: layer.height,
+                        alpha: layer.alpha,
+                        layers: Default::default(),
+                    },
+                    transform: *transform,
+                    asset_anchor: *asset_anchor,
+                    alpha: layer.alpha,
+                })
+                .insert(TemporaryRenderEntity);
+            n_svgs += 1;
+        }
+    }
+
+    frame_data.n_world_svgs = n_svgs;
+}
+
 pub fn extract_ui_svg_assets(
     mut commands: Commands,
     query_views: Query<
@@ -153,7 +217,7 @@ pub fn extract_ui_svg_assets(
                     ui_transform: *ui_transform,
                     ui_node: *ui_node,
                     alpha: asset.alpha,
-                    render_image: render_image.map(|r| r.0.clone()),
+                    render_image: render_image.map(|r| r.image.clone()),
                 })
                 .insert(TemporaryRenderEntity);
             n_svgs += 1;

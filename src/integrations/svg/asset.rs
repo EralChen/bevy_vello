@@ -4,15 +4,34 @@ use bevy::{prelude::*, reflect::TypePath};
 
 use crate::prelude::*;
 
+#[derive(Clone)]
+pub struct VelloSvgLayer {
+    pub id: String,
+    pub scene: Arc<vello::Scene>,
+    pub width: f32,
+    pub height: f32,
+    pub offset: Vec2,
+    pub alpha: f32,
+}
+
 #[derive(Asset, TypePath, Clone)]
 pub struct VelloSvg {
     pub scene: Arc<vello::Scene>,
     pub width: f32,
     pub height: f32,
     pub alpha: f32,
+    pub layers: Arc<Vec<VelloSvgLayer>>,
 }
 
 impl VelloSvg {
+    pub fn layers(&self) -> &[VelloSvgLayer] {
+        self.layers.as_ref()
+    }
+
+    pub fn layer(&self, id: &str) -> Option<&VelloSvgLayer> {
+        self.layers.iter().find(|layer| layer.id == id)
+    }
+
     /// Returns the bounding box in world space
     pub fn bb_in_world_space(&self, gtransform: &GlobalTransform) -> Rect {
         // Convert local coordinates to world coordinates

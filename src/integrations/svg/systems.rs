@@ -9,10 +9,9 @@ use bevy::{
     ui::{ContentSize, NodeMeasure},
 };
 
-use super::VelloUiSvgImage;
+use super::{VelloSvgLayer2d, VelloUiSvgImage};
 
-fn helper_calculate_aabb(svg: &VelloSvg, anchor: &VelloSvgAnchor) -> Aabb {
-    let (width, height) = (svg.width, svg.height);
+fn helper_calculate_aabb(width: f32, height: f32, anchor: &VelloSvgAnchor) -> Aabb {
     let half_size = Vec3::new(width / 2.0, height / 2.0, 0.0);
     let (dx, dy) = {
         match anchor {
@@ -49,8 +48,33 @@ pub fn update_svg_2d_aabb_on_asset_load(
             continue;
         };
         for (mut aabb, _, anchor) in world_svgs.iter_mut().filter(|(_, svg, _)| svg.id() == id) {
-            let new_aabb = helper_calculate_aabb(svg, anchor);
+            let new_aabb = helper_calculate_aabb(svg.width, svg.height, anchor);
             *aabb = new_aabb;
+        }
+    }
+}
+
+pub fn update_svg_layer_2d_aabb_on_asset_load(
+    mut asset_events: MessageReader<AssetEvent<VelloSvg>>,
+    mut world_svgs: Query<(&mut Aabb, &VelloSvgLayer2d, &VelloSvgAnchor)>,
+    svgs: Res<Assets<VelloSvg>>,
+) {
+    for event in asset_events.read() {
+        let id = if let AssetEvent::LoadedWithDependencies { id } = event {
+            *id
+        } else {
+            continue;
+        };
+        let Some(svg) = svgs.get(id) else {
+            continue;
+        };
+
+        for (mut aabb, layer_ref, anchor) in world_svgs.iter_mut().filter(|(_, layer_ref, _)| layer_ref.svg.id() == id) {
+            let Some(layer) = svg.layer(&layer_ref.layer) else {
+                continue;
+            };
+
+            *aabb = helper_calculate_aabb(layer.width, layer.height, anchor);
         }
     }
 }
@@ -64,8 +88,24 @@ pub fn update_svg_2d_aabb_on_change(
             // Not yet loaded
             continue;
         };
-        let new_aabb = helper_calculate_aabb(svg, anchor);
+        let new_aabb = helper_calculate_aabb(svg.width, svg.height, anchor);
         *aabb = new_aabb;
+    }
+}
+
+pub fn update_svg_layer_2d_aabb_on_change(
+    mut world_svgs: Query<(&mut Aabb, &VelloSvgLayer2d, &VelloSvgAnchor), Changed<VelloSvgLayer2d>>,
+    svgs: Res<Assets<VelloSvg>>,
+) {
+    for (mut aabb, layer_ref, anchor) in world_svgs.iter_mut() {
+        let Some(svg) = svgs.get(&layer_ref.svg) else {
+            continue;
+        };
+        let Some(layer) = svg.layer(&layer_ref.layer) else {
+            continue;
+        };
+
+        *aabb = helper_calculate_aabb(layer.width, layer.height, anchor);
     }
 }
 
@@ -108,12 +148,17 @@ pub fn manage_ui_svg_render_images(
         let target_w = (svg.width.ceil() as u32).max(1);
         let target_h = (svg.height.ceil() as u32).max(1);
 
-        // Skip if already set up with the right size
+        // Skip if already set up with the same SVG handle and matching image size.
+        // When the SVG handle changes (e.g. normal→selected card frame), svg_id
+        // will differ and a new image is created — the new AssetId is absent from
+        // UiSvgRenderCache so it gets re-rendered next frame automatically.
         if let Some(existing) = existing {
-            if let Some(img) = images.get(existing.0.id()) {
-                let ext = img.size().to_extents();
-                if ext.width == target_w && ext.height == target_h {
-                    continue;
+            if existing.svg_id == svg_handle.id() {
+                if let Some(img) = images.get(existing.image.id()) {
+                    let ext = img.size().to_extents();
+                    if ext.width == target_w && ext.height == target_h {
+                        continue;
+                    }
                 }
             }
         }
@@ -121,7 +166,10 @@ pub fn manage_ui_svg_render_images(
         // Create a render target image
         let image_handle = create_vello_ui_render_image(&mut images, target_w, target_h);
         commands.entity(entity).insert((
-            VelloUiSvgImage(image_handle.clone()),
+            VelloUiSvgImage {
+                image: image_handle.clone(),
+                svg_id: svg_handle.id(),
+            },
             ImageNode::new(image_handle),
         ));
     }
